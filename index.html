@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Registro de Presença</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 16px; text-align: center; background:#111; color:#eee; }
+    #reader { width: 100%; max-width: 400px; margin: 8px auto; border-radius: 8px; overflow: hidden; }
+    input { font-size: 16px; padding: 10px; margin: 6px 0; width: 90%; max-width: 380px; border-radius: 6px; border: 1px solid #444; }
+    button { font-size: 16px; padding: 10px 20px; margin: 10px 0; border-radius: 6px; border: none; background: #4caf50; color: white; }
+    #status { font-size: 20px; font-weight: bold; margin-top: 12px; min-height: 40px; }
+    .ok { color: #4caf50; }
+    .dup { color: #ff9800; }
+    .err { color: #f44336; }
+  </style>
+</head>
+<body>
+  <h3>Registro de Presença</h3>
+  <input id="escaneador" placeholder="Seu nome (escaneador)">
+  <input id="reuniao" placeholder="Data da reunião">
+  <button id="btnIniciar">Iniciar Câmera</button>
+  <div id="reader"></div>
+  <div id="status">Preencha os campos acima e toque em "Iniciar Câmera"</div>
+
+  <script>
+    // COLE AQUI A URL DO SEU APPS SCRIPT (.../exec)
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyyPRghpN0i-6r7ekunIdwRF4EuW0UIioObv6vk6uPdp_dLgwHX4Bry1KB26XDmyxyS/exec';
+
+    const statusDiv = document.getElementById('status');
+    let processando = false;
+    let cameraIniciada = false;
+    const html5QrCode = new Html5Qrcode("reader");
+
+    document.getElementById('btnIniciar').addEventListener('click', function() {
+      const escaneador = document.getElementById('escaneador').value.trim();
+      const reuniao = document.getElementById('reuniao').value.trim();
+      if (!escaneador || !reuniao) {
+        statusDiv.className = 'err';
+        statusDiv.textContent = 'Preencha seu nome e a data da reunião antes de iniciar a câmera.';
+        return;
+      }
+      if (cameraIniciada) return;
+      statusDiv.textContent = 'Solicitando acesso à câmera...';
+      html5QrCode.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 250 },
+        onScanSuccess
+      ).then(function() {
+        cameraIniciada = true;
+        statusDiv.textContent = 'Câmera pronta. Aponte para o QR Code.';
+      }).catch(function(err) {
+        statusDiv.className = 'err';
+        statusDiv.textContent = 'Erro ao abrir câmera: ' + err;
+      });
+    });
+
+    function jsonpRequest(id, reuniao, escaneador) {
+      return new Promise(function(resolve, reject) {
+        const callbackName = 'jsonpCallback_' + Date.now();
+        window[callbackName] = function(data) {
+          resolve(data);
+          delete window[callbackName];
+          script.remove();
+        };
+        const params = new URLSearchParams({ id: id, reuniao: reuniao, escaneador: escaneador, callback: callbackName });
+        const script = document.createElement('script');
+        script.src = APPS_SCRIPT_URL + '?' + params.toString();
+        script.onerror = function() {
+          reject(new Error('Falha ao conectar ao servidor'));
+          delete window[callbackName];
+          script.remove();
+        };
+        document.body.appendChild(script);
+      });
+    }
+
+    function onScanSuccess(decodedText) {
+      if (processando) return;
+      const escaneador = document.getElementById('escaneador').value.trim();
+      const reuniao = document.getElementById('reuniao').value.trim();
+      if (!escaneador || !reuniao) {
+        statusDiv.className = 'err';
+        statusDiv.textContent = 'Preencha seu nome e a reunião antes de escanear.';
+        return;
+      }
+      processando = true;
+      statusDiv.textContent = 'Registrando...';
+
+      jsonpRequest(decodedText, reuniao, escaneador)
+        .then(function(res) {
+          if (res.status === 'sucesso') {
+            statusDiv.className = 'ok';
+            statusDiv.textContent = '✓ ' + res.mensagem;
+          } else if (res.status === 'duplicado') {
+            statusDiv.className = 'dup';
+            statusDiv.textContent = '⚠ ' + res.mensagem;
+          } else {
+            statusDiv.className = 'err';
+            statusDiv.textContent = '✗ ' + res.mensagem;
+          }
+          setTimeout(() => { processando = false; }, 1200);
+        })
+        .catch(function(err) {
+          statusDiv.className = 'err';
+          statusDiv.textContent = '✗ Erro de conexão: ' + err;
+          processando = false;
+        });
+    }
+  </script>
+</body>
+</html>
